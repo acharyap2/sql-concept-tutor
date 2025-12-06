@@ -1,7 +1,7 @@
 import streamlit as st
 
 # ============================
-#  VET CLINIC SCHEMA (FROM CLASS)
+#  VET CLINIC SCHEMA
 # ============================
 
 SCHEMA_TEXT = """
@@ -50,432 +50,351 @@ TABLE procedure_history(
 # ============================
 #  LEVEL DEFINITIONS (1–15)
 # ============================
-# Each level has:
-# - question, answer_sql, explanation
-# - required_tables: list of lowercase table names that should appear
-# - required_keywords: list of lowercase SQL fragments to look for
-# - forbidden_keywords: list of patterns to warn about (e.g., "select *")
 
 LEVELS = [
     {
         "level": 1,
-        "title": "List all owners",
-        "question": "List all owners, showing owner_id, first_name, last_name, and city.",
+        "title": "Owners in a specific state",
+        "question": (
+            "List owner_id, first_name, last_name, city, and state_abbre for all owners "
+            "who live in the state 'Ohio' (state = 'OH'), ordered by last_name."
+        ),
         "answer_sql": """
-SELECT owner_id, first_name, last_name, city
-FROM owners;
+SELECT owner_id,
+       first_name,
+       last_name,
+       city,
+       state_abbre
+FROM owners
+WHERE state_abbre = 'OH'
+ORDER BY last_name;
 """,
-        "explanation": "Basic SELECT from the owners table with four columns.",
-        "required_tables": ["owners"],
-        "required_keywords": [],
-        "forbidden_keywords": ["select *"]
+        "explanation": "Basic filtering on state_abbre and sorting by last_name."
     },
     {
         "level": 2,
-        "title": "Filter older pets",
-        "question": "List the name, kind, and age of all pets that are older than 5 years.",
+        "title": "Average age of pets by kind",
+        "question": (
+            "For each kind of pet (e.g., 'Dog', 'Cat'), show kind and the average age of pets of that kind. "
+            "Name the calculated column avg_age and order by avg_age descending."
+        ),
         "answer_sql": """
-SELECT name, kind, age
+SELECT kind,
+       AVG(age) AS avg_age
 FROM pets
-WHERE age > 5;
+GROUP BY kind
+ORDER BY avg_age DESC;
 """,
-        "explanation": "We use a WHERE clause on age > 5 in the pets table.",
-        "required_tables": ["pets"],
-        "required_keywords": ["where"],
-        "forbidden_keywords": ["select *"]
+        "explanation": "GROUP BY kind and use AVG(age) to compute the average age per kind."
     },
     {
         "level": 3,
-        "title": "Owners and their pets",
-        "question": "List each owner's first_name, last_name, and the name of each pet they own.",
+        "title": "Owners and number of pets in each city",
+        "question": (
+            "For each city, show the city name, the number of distinct owners in that city, "
+            "and the total number of pets owned by people in that city. "
+            "Name the columns nr_owners and nr_pets."
+        ),
         "answer_sql": """
-SELECT o.first_name, o.last_name, p.name AS pet_name
+SELECT o.city,
+       COUNT(DISTINCT o.owner_id) AS nr_owners,
+       COUNT(p.pet_id)           AS nr_pets
 FROM owners o
-JOIN pets p ON o.owner_id = p.owner_id;
+LEFT JOIN pets p ON o.owner_id = p.owner_id
+GROUP BY o.city;
 """,
-        "explanation": "We join owners and pets on owner_id so we can show owner and pet together.",
-        "required_tables": ["owners", "pets"],
-        "required_keywords": ["join"],
-        "forbidden_keywords": []
+        "explanation": (
+            "We join owners with pets and group by city. COUNT(DISTINCT owner_id) counts owners, "
+            "and COUNT(pet_id) counts pets. LEFT JOIN ensures cities with owners but no pets still appear."
+        )
     },
     {
         "level": 4,
-        "title": "Count pets per owner",
-        "question": "For each owner, show owner_id and the number of pets they own.",
+        "title": "Number of procedures per pet",
+        "question": (
+            "For each pet, show pet_id, name, and the number of procedures that pet has received. "
+            "Name the calculated column nr_procedures. Only include pets that have at least one procedure."
+        ),
         "answer_sql": """
-SELECT owner_id, COUNT(*) AS nr_pets
-FROM pets
-GROUP BY owner_id;
+SELECT p.pet_id,
+       p.name,
+       COUNT(*) AS nr_procedures
+FROM pets p
+JOIN procedure_history h ON p.pet_id = h.pet_id
+GROUP BY p.pet_id, p.name;
 """,
-        "explanation": "GROUP BY owner_id groups rows per owner; COUNT(*) counts how many pets they have.",
-        "required_tables": ["pets"],
-        "required_keywords": ["group by", "count("],
-        "forbidden_keywords": []
+        "explanation": "We join pets with procedure_history and group by each pet to count how many procedure_history rows it has."
     },
     {
         "level": 5,
-        "title": "Owners with more than one pet",
-        "question": "Show owner_id values for owners who have more than one pet.",
+        "title": "Average and extreme prices per procedure type",
+        "question": (
+            "For each procedure_type, show procedure_type, the average price, the minimum price, "
+            "and the maximum price for that type. Name the columns avg_price, min_price, and max_price."
+        ),
         "answer_sql": """
-SELECT owner_id
-FROM pets
-GROUP BY owner_id
-HAVING COUNT(*) > 1;
+SELECT procedure_type,
+       AVG(price) AS avg_price,
+       MIN(price) AS min_price,
+       MAX(price) AS max_price
+FROM procedure_details
+GROUP BY procedure_type;
 """,
-        "explanation": "Use HAVING COUNT(*) > 1 to keep only owners with more than one pet.",
-        "required_tables": ["pets"],
-        "required_keywords": ["group by", "having", "count("],
-        "forbidden_keywords": []
+        "explanation": "We group by procedure_type and compute AVG, MIN, and MAX over the price column."
     },
     {
         "level": 6,
-        "title": "Procedures above a price threshold",
-        "question": "List procedure_type, procedure_subcode, and price for all procedures that cost more than 500, ordered by price descending.",
+        "title": "Procedure types with above-average price",
+        "question": (
+            "List procedure_type values whose average price is greater than the overall average price "
+            "across all procedures. Do not show the average itself, just the procedure_type."
+        ),
         "answer_sql": """
-SELECT procedure_type, procedure_subcode, price
-FROM procedure_details
-WHERE price > 500
-ORDER BY price DESC;
-""",
-        "explanation": "We filter by price > 500 and ORDER BY price DESC to show most expensive first.",
-        "required_tables": ["procedure_details"],
-        "required_keywords": ["where", "order by"],
-        "forbidden_keywords": []
-    },
-    {
-        "level": 7,
-        "title": "Number of subcodes per procedure type",
-        "question": "For each procedure_type, report the number of subcodes it has, naming the calculated column nr_subcodes, ordered from most subcodes to fewest.",
-        "answer_sql": """
-SELECT procedure_type,
-       COUNT(procedure_subcode) AS nr_subcodes
+SELECT procedure_type
 FROM procedure_details
 GROUP BY procedure_type
-ORDER BY nr_subcodes DESC;
-""",
-        "explanation": "We group by procedure_type and count subcodes, then order by the count descending.",
-        "required_tables": ["procedure_details"],
-        "required_keywords": ["group by", "count(", "order by"],
-        "forbidden_keywords": []
-    },
-    {
-        "level": 8,
-        "title": "Most expensive procedure(s)",
-        "question": "Find the procedure_type, procedure_subcode, and price of the most expensive procedure(s).",
-        "answer_sql": """
-SELECT procedure_type, procedure_subcode, price
-FROM procedure_details
-WHERE price = (
-    SELECT MAX(price)
+HAVING AVG(price) > (
+    SELECT AVG(price)
     FROM procedure_details
 );
 """,
-        "explanation": "A subquery finds the maximum price; the outer query returns all procedures with that price.",
-        "required_tables": ["procedure_details"],
-        "required_keywords": ["where", "max("],
-        "forbidden_keywords": []
+        "explanation": "We compare each procedure_type's AVG(price) to the overall AVG(price) using HAVING and a scalar subquery."
     },
     {
-        "level": 9,
-        "title": "Owners with at least 2 different pets with care",
+        "level": 7,
+        "title": "Owners with many procedures",
         "question": (
-            "Report owner_id, first_name, last_name, and the number of different pets (nr_of_pets) for each owner who has "
-            "at least 2 different pets that received pet care services. Count each pet only once per owner."
+            "For each owner, show owner_id, first_name, last_name, and the total number of procedures "
+            "performed on all of their pets. Name the column nr_procedures. Only include owners who have "
+            "at least 3 procedures in total."
         ),
         "answer_sql": """
 SELECT o.owner_id,
        o.first_name,
        o.last_name,
-       COUNT(DISTINCT h.pet_id) AS nr_of_pets
+       COUNT(*) AS nr_procedures
 FROM owners o
 JOIN pets p ON o.owner_id = p.owner_id
 JOIN procedure_history h ON p.pet_id = h.pet_id
 GROUP BY o.owner_id, o.first_name, o.last_name
-HAVING COUNT(DISTINCT h.pet_id) >= 2
-ORDER BY nr_of_pets DESC;
+HAVING COUNT(*) >= 3;
 """,
-        "explanation": "We join owners → pets → procedure_history and use COUNT(DISTINCT h.pet_id) with HAVING to require at least 2 different pets.",
-        "required_tables": ["owners", "pets", "procedure_history"],
-        "required_keywords": ["join", "group by", "having", "count(distinct"],
-        "forbidden_keywords": []
+        "explanation": "We join owners → pets → procedure_history and group by owner, then filter with HAVING COUNT(*) >= 3."
     },
     {
-        "level": 10,
-        "title": "Procedures that were never used",
-        "question": "Report procedure_type and procedure_subcode of all procedures that have never been used in procedure_history. Use a correlated subquery with NOT EXISTS or COUNT(*).",
+        "level": 8,
+        "title": "Pets that never had any procedure",
+        "question": (
+            "List pet_id and name for all pets that never had any procedure recorded in procedure_history."
+        ),
         "answer_sql": """
-SELECT d.procedure_type, d.procedure_subcode
-FROM procedure_details d
+SELECT p.pet_id,
+       p.name
+FROM pets p
 WHERE NOT EXISTS (
     SELECT 1
     FROM procedure_history h
-    WHERE h.procedure_type = d.procedure_type
-      AND h.procedure_subcode = d.procedure_subcode
+    WHERE h.pet_id = p.pet_id
 );
 """,
-        "explanation": "For each procedure in procedure_details, we check that no matching rows exist in procedure_history using NOT EXISTS.",
-        "required_tables": ["procedure_details", "procedure_history"],
-        "required_keywords": ["where", "not exists"],
-        "forbidden_keywords": []
+        "explanation": "NOT EXISTS with a correlated subquery checks that no history rows exist for that pet_id."
+    },
+    {
+        "level": 9,
+        "title": "Owners with pets of multiple kinds",
+        "question": (
+            "List owner_id, first_name, and last_name for owners who own pets of at least two different kinds "
+            "(for example, both a dog and a cat)."
+        ),
+        "answer_sql": """
+SELECT o.owner_id,
+       o.first_name,
+       o.last_name
+FROM owners o
+JOIN pets p ON o.owner_id = p.owner_id
+GROUP BY o.owner_id, o.first_name, o.last_name
+HAVING COUNT(DISTINCT p.kind) >= 2;
+""",
+        "explanation": "We group by owner and use COUNT(DISTINCT kind) to require at least two different pet kinds."
+    },
+    {
+        "level": 10,
+        "title": "Owners whose pets only received one procedure type",
+        "question": (
+            "List owner_id, first_name, and last_name for owners whose pets have received procedures "
+            "from exactly one distinct procedure_type (for all of their pets combined)."
+        ),
+        "answer_sql": """
+SELECT o.owner_id,
+       o.first_name,
+       o.last_name
+FROM owners o
+JOIN pets p ON o.owner_id = p.owner_id
+JOIN procedure_history h ON p.pet_id = h.pet_id
+GROUP BY o.owner_id, o.first_name, o.last_name
+HAVING COUNT(DISTINCT h.procedure_type) = 1;
+""",
+        "explanation": "We join owners, pets, and history, group by owner, and require exactly one distinct procedure_type in HAVING."
     },
     {
         "level": 11,
-        "title": "Total cost per pet",
-        "question": "For each pet, show pet_id, name, and the total amount spent on that pet's procedures.",
+        "title": "High-spending owners using a CTE",
+        "question": (
+            "Using a WITH clause, first compute, for each owner, the total amount spent on all procedures "
+            "for their pets. Then select owner_id, first_name, last_name, and total_spent for owners whose "
+            "total_spent is greater than 500."
+        ),
         "answer_sql": """
-SELECT p.pet_id,
-       p.name,
-       SUM(d.price) AS total_cost
-FROM pets p
-JOIN procedure_history h ON p.pet_id = h.pet_id
-JOIN procedure_details d
-    ON h.procedure_type = d.procedure_type
-   AND h.procedure_subcode = d.procedure_subcode
-GROUP BY p.pet_id, p.name;
+WITH owner_totals AS (
+    SELECT o.owner_id,
+           o.first_name,
+           o.last_name,
+           SUM(d.price) AS total_spent
+    FROM owners o
+    JOIN pets p ON o.owner_id = p.owner_id
+    JOIN procedure_history h ON p.pet_id = h.pet_id
+    JOIN procedure_details d
+      ON h.procedure_type = d.procedure_type
+     AND h.procedure_subcode = d.procedure_subcode
+    GROUP BY o.owner_id, o.first_name, o.last_name
+)
+SELECT owner_id, first_name, last_name, total_spent
+FROM owner_totals
+WHERE total_spent > 500;
 """,
-        "explanation": "We join pets → procedure_history → procedure_details, then group by pet to sum the price of all procedures.",
-        "required_tables": ["pets", "procedure_history", "procedure_details"],
-        "required_keywords": ["join", "group by", "sum("],
-        "forbidden_keywords": []
+        "explanation": "The CTE owner_totals computes total_spent per owner, and the outer query filters to owners over 500."
     },
     {
         "level": 12,
-        "title": "Total cost per owner",
-        "question": "For each owner, show owner_id, first_name, last_name, and the total amount spent on all of their pets' procedures.",
+        "title": "Update prices with CASE by procedure type",
+        "question": (
+            "Write an UPDATE that increases prices in procedure_details as follows: "
+            "for procedures of type 'VACCINATIONS', increase price by 15%; "
+            "for procedures of type 'GROOMING', increase price by 5%; "
+            "for all other procedure types, leave the price unchanged. Use a single UPDATE with a CASE expression."
+        ),
+        "answer_sql": """
+UPDATE procedure_details
+SET price = CASE
+    WHEN procedure_type = 'VACCINATIONS' THEN price * 1.15
+    WHEN procedure_type = 'GROOMING'     THEN price * 1.05
+    ELSE price
+END;
+""",
+        "explanation": "CASE chooses a different multiplier based on procedure_type; other types keep the same price."
+    },
+    {
+        "level": 13,
+        "title": "Delete history for very cheap procedures",
+        "question": (
+            "Delete all rows from procedure_history that correspond to procedures with a price less than 20. "
+            "Use a subquery on procedure_details (joined by procedure_type and procedure_subcode)."
+        ),
+        "answer_sql": """
+DELETE FROM procedure_history h
+WHERE EXISTS (
+    SELECT 1
+    FROM procedure_details d
+    WHERE d.procedure_type = h.procedure_type
+      AND d.procedure_subcode = h.procedure_subcode
+      AND d.price < 20
+);
+""",
+        "explanation": "The correlated subquery finds procedure_details with price < 20 that match each history row; EXISTS keeps only those to delete."
+    },
+    {
+        "level": 14,
+        "title": "Daily activity summary",
+        "question": (
+            "For each procedure_date, show procedure_date, the number of distinct pets treated that day, "
+            "and the total revenue for that day. Name the columns nr_pets and total_revenue."
+        ),
+        "answer_sql": """
+SELECT h.procedure_date,
+       COUNT(DISTINCT h.pet_id) AS nr_pets,
+       SUM(d.price)             AS total_revenue
+FROM procedure_history h
+JOIN procedure_details d
+  ON h.procedure_type = d.procedure_type
+ AND h.procedure_subcode = d.procedure_subcode
+GROUP BY h.procedure_date;
+""",
+        "explanation": "We group by procedure_date and compute both the number of distinct pets and the sum of prices."
+    },
+    {
+        "level": 15,
+        "title": "Spending by owner and procedure type",
+        "question": (
+            "For each combination of owner and procedure_type, show owner_id, first_name, last_name, procedure_type, "
+            "and the total amount spent on that type. Name the calculated column total_spent. "
+            "Only include rows where total_spent is at least 500, and order the final result by total_spent descending."
+        ),
         "answer_sql": """
 SELECT o.owner_id,
        o.first_name,
        o.last_name,
+       d.procedure_type,
        SUM(d.price) AS total_spent
 FROM owners o
 JOIN pets p ON o.owner_id = p.owner_id
 JOIN procedure_history h ON p.pet_id = h.pet_id
 JOIN procedure_details d
-    ON h.procedure_type = d.procedure_type
-   AND h.procedure_subcode = d.procedure_subcode
-GROUP BY o.owner_id, o.first_name, o.last_name;
+  ON h.procedure_type = d.procedure_type
+ AND h.procedure_subcode = d.procedure_subcode
+GROUP BY o.owner_id, o.first_name, o.last_name, d.procedure_type
+HAVING SUM(d.price) >= 500
+ORDER BY total_spent DESC;
 """,
-        "explanation": "We join owners → pets → procedure_history → procedure_details and group by owner to sum all prices.",
-        "required_tables": ["owners", "pets", "procedure_history", "procedure_details"],
-        "required_keywords": ["join", "group by", "sum("],
-        "forbidden_keywords": []
-    },
-    {
-        "level": 13,
-        "title": "Increase prices using CASE",
-        "question": (
-            "Write an UPDATE that increases the price of all procedures under 25 by 10%, "
-            "and increases the price of all procedures that cost 25 or more by 5%. Use a single UPDATE with CASE."
-        ),
-        "answer_sql": """
-UPDATE procedure_details
-SET price = CASE
-    WHEN price < 25 THEN price * 1.10
-    ELSE price * 1.05
-END;
-""",
-        "explanation": "We use CASE in the SET clause to apply different multipliers depending on the current price.",
-        "required_tables": ["procedure_details"],
-        "required_keywords": ["update", "set", "case"],
-        "forbidden_keywords": []
-    },
-    {
-        "level": 14,
-        "title": "Delete history for pets starting with 'J'",
-        "question": "Delete all procedure_history rows for pets whose names start with the letter 'J'. Use a subquery on pets.",
-        "answer_sql": """
-DELETE FROM procedure_history
-WHERE pet_id IN (
-    SELECT pet_id
-    FROM pets
-    WHERE UPPER(name) LIKE 'J%'
-);
-""",
-        "explanation": "We find all pet_id values for pets whose name starts with 'J' in a subquery, then delete their history rows.",
-        "required_tables": ["procedure_history", "pets"],
-        "required_keywords": ["delete", "where", "in", "select"],
-        "forbidden_keywords": []
-    },
-    {
-        "level": 15,
-        "title": "High-revenue procedure types",
-        "question": (
-            "For each procedure_type, show procedure_type and the total revenue "
-            "from all procedures of that type, but only include procedure types where total revenue is at least 2000."
-        ),
-        "answer_sql": """
-SELECT d.procedure_type,
-       SUM(d.price) AS total_revenue
-FROM procedure_history h
-JOIN procedure_details d
-    ON h.procedure_type = d.procedure_type
-   AND h.procedure_subcode = d.procedure_subcode
-GROUP BY d.procedure_type
-HAVING SUM(d.price) >= 2000;
-""",
-        "explanation": "We join history with details, group by procedure_type, sum prices, and filter groups with HAVING.",
-        "required_tables": ["procedure_history", "procedure_details"],
-        "required_keywords": ["join", "group by", "having", "sum("],
-        "forbidden_keywords": []
+        "explanation": (
+            "We join all four tables, group by owner and procedure_type, and keep only combinations with SUM(price) >= 500, "
+            "then sort by total_spent descending."
+        )
     },
 ]
 
-# ============================
-#  KEYWORD HINTS
-# ============================
-
-KEYWORD_HINTS = {
-    "join": "This query probably needs at least one JOIN between the related tables.",
-    "group by": "Because the question asks 'for each ...', you likely need GROUP BY.",
-    "having": "To filter groups based on aggregates (like COUNT or SUM), use HAVING.",
-    "distinct": "Use DISTINCT to avoid duplicate values in the result.",
-    "order by": "Use ORDER BY to sort the results (for example, by price or by count).",
-    "avg(": "Use AVG(...) to compute the average of a numeric column.",
-    "sum(": "Use SUM(...) to add up numeric values (like total cost or revenue).",
-    "count(": "Use COUNT(...) to count rows or distinct values.",
-    "count(distinct": "COUNT(DISTINCT ...) is useful when each entity should be counted only once.",
-    "where": "Use a WHERE clause to filter rows before grouping.",
-    "not exists": "NOT EXISTS is useful to find rows that have no matching rows in another table.",
-    "exists": "EXISTS can test whether related rows exist in another table.",
-    "case": "The CASE expression lets you apply different logic in one statement (for example, different percentage increases).",
-    "update": "Use UPDATE to modify existing rows in a table.",
-    "delete": "Use DELETE FROM ... WHERE ... to remove rows from a table.",
-    "in": "IN is handy for matching a value against a list or a subquery result.",
-    "with": "WITH introduces a common table expression (CTE) that can be referenced in the main query.",
-}
-
-# ============================
-#  ANALYSIS FUNCTION
-# ============================
-
-def analyze_answer(user_sql: str, level_info: dict) -> str:
-    """
-    Simple rule-based analysis:
-      - Checks that required tables appear.
-      - Checks that required keywords (JOIN, GROUP BY, etc.) appear.
-      - Warns about forbidden patterns like SELECT *.
-    Returns a feedback string.
-    """
-    if not user_sql or user_sql.strip() == "":
-        return "Please type a SQL statement above before asking for hints."
-
-    feedback_lines = []
-    user_lower = user_sql.lower()
-
-    # Check required tables
-    missing_tables = []
-    for table in level_info.get("required_tables", []):
-        if table not in user_lower:
-            missing_tables.append(table)
-
-    if missing_tables:
-        feedback_lines.append("🔍 **Tables you might be missing:**")
-        for t in missing_tables:
-            feedback_lines.append(f"- It looks like you might need to use the `{t}` table in this query.")
-        feedback_lines.append("")
-
-    # Check required keywords
-    missing_keywords = []
-    for kw in level_info.get("required_keywords", []):
-        if kw not in user_lower:
-            missing_keywords.append(kw)
-
-    if missing_keywords:
-        feedback_lines.append("🧠 **SQL features you might need:**")
-        for kw in missing_keywords:
-            hint = KEYWORD_HINTS.get(kw, f"You may need to use `{kw.upper()}` in this query.")
-            feedback_lines.append(f"- {hint}")
-        feedback_lines.append("")
-
-    # Check forbidden patterns
-    bad_patterns = []
-    for bad in level_info.get("forbidden_keywords", []):
-        if bad in user_lower:
-            bad_patterns.append(bad)
-
-    if bad_patterns:
-        feedback_lines.append("⚠️ **Style / pattern warnings:**")
-        for bad in bad_patterns:
-            if bad == "select *":
-                feedback_lines.append("- Try to avoid `SELECT *`. Select only the columns requested in the question.")
-            else:
-                feedback_lines.append(f"- Consider avoiding the pattern `{bad}` here.")
-        feedback_lines.append("")
-
-    # A tiny generic hint about HAVING without GROUP BY
-    if "having" in user_lower and "group by" not in user_lower:
-        feedback_lines.append("⚠️ You used HAVING but not GROUP BY. HAVING is normally used together with GROUP BY.")
-
-    if not feedback_lines:
-        feedback_lines.append("✅ Your statement contains the expected tables and main SQL features for this level.")
-        feedback_lines.append("Now compare details (columns, conditions, grouping) with the model solution below.")
-
-    return "\n".join(feedback_lines)
+# Helper to find level info
+def get_level_info(level_number: int):
+    for lvl in LEVELS:
+        if lvl["level"] == level_number:
+            return lvl
+    return None
 
 # ============================
 #  STREAMLIT UI
 # ============================
 
-st.set_page_config(page_title="Rule-Based SQL Tutor – Vet Clinic", layout="centered")
+st.set_page_config(page_title="CSC 350 SQL Practice Tutor", layout="centered")
 
-st.title("🧠 Rule-Based AI-Like SQL Tutor (Vet Clinic DB)")
-st.write(
-    "Practice advanced SQL on the veterinary clinic database (joins, aggregates, "
-    "subqueries, NOT EXISTS, CASE, UPDATE, DELETE). "
-    "Type your answer, then click **Get Hints** to see what you might be missing."
-)
+st.title("CSC 350 SQL Practice Tutor")
 
-st.markdown("## 📘 Relational Schema")
+st.caption("Note: Please don't look at the solution first; this page is for you to practice writing SQL.")
+
+st.markdown("## Relational Schema")
 st.code(SCHEMA_TEXT, language="sql")
 
 st.markdown("---")
 
-# Sidebar: choose level
-levels_available = [lvl["level"] for lvl in LEVELS]
-default_level = 1
+# Sidebar: old-school level selection using radio buttons
+st.sidebar.header("Select Level")
+level_numbers = [lvl["level"] for lvl in LEVELS]
+selected_level = st.sidebar.radio("Level", options=level_numbers, index=0)
 
-st.sidebar.header("Choose Level")
-selected_level = st.sidebar.slider(
-    "Level (1 = easiest, 15 = hardest)",
-    min_value=min(levels_available),
-    max_value=max(levels_available),
-    value=default_level,
-    step=1,
-)
-
-# Get level info
-level_info = next((lvl for lvl in LEVELS if lvl["level"] == selected_level), None)
+level_info = get_level_info(selected_level)
 
 if level_info is None:
-    st.error("Something went wrong: level not found.")
+    st.error("Level not found.")
 else:
-    st.markdown(f"## ✅ Level {level_info['level']}: {level_info['title']}")
-    st.markdown(f"**Question:** {level_info['question']}")
+    st.markdown(f"### Level {level_info['level']}: {level_info['title']}")
+    st.write(level_info["question"])
 
-    st.markdown(
-        "✏️ **Tip:** Try to write the query or statement yourself first. "
-        "Then click **Get Hints** to see which tables or SQL features you might be missing."
-    )
+    # User SQL area (no hints, no grading)
+    _ = st.text_area("Write your SQL here:", height=200)
 
-    # Text area for user's SQL
-    user_sql = st.text_area(
-        "Your SQL answer (not auto-graded, but analyzed for hints):",
-        height=200,
-    )
-
-    if st.button("🔍 Get Hints"):
-        feedback = analyze_answer(user_sql, level_info)
-        st.markdown("### 💡 Hints / Feedback")
-        st.write(feedback)
-
-    with st.expander("✅ Show model solution and explanation"):
+    with st.expander("Show solution and explanation"):
         st.markdown("**Suggested SQL solution:**")
         st.code(level_info["answer_sql"], language="sql")
         st.markdown("**Explanation:**")
         st.write(level_info["explanation"])
 
-    if selected_level == max(levels_available):
-        st.success(
-            "🎉 You've reached Level 15 on the Vet Clinic database. "
-            "If you understand these statements, you're in great shape for advanced SQL in this course!"
-        )
+    if selected_level == max(level_numbers):
+        st.success("🎉 You reached the highest level in this practice tutor.")
